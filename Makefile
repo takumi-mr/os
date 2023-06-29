@@ -1,6 +1,7 @@
 -include config.mk
 
 BOARD ?= rpi4
+ARCH ?= arm
 PLATFORM ?= v2-hdmi
 SUFFIX ?=
 STAGES ?= __init__ os pikvm-repo watchdog rootdelay ro no-audit pikvm __cleanup__
@@ -11,6 +12,9 @@ TIMEZONE ?= Europe/Moscow
 #REPO_URL ?= http://mirror.yandex.ru/archlinux-arm
 REPO_URL ?= http://de3.mirror.archlinuxarm.org
 BUILD_OPTS ?=
+BUILDER_URL ?= https://github.com/mdevaev/pi-builder
+PIKVM_REPO_URL ?= https://pikvm.org/repos
+PIKVM_REPO_KEY ?= 912C773ABBD1B584
 
 ROOT_PASSWD ?= root
 WEBUI_ADMIN_PASSWD ?= admin
@@ -19,6 +23,7 @@ IPMI_ADMIN_PASSWD ?= admin
 SUDO ?= sudo
 
 CARD ?= /dev/mmcblk0
+IMAGE_FILE ?= images/$(PLATFORM)-$(BOARD)-$(ARCH)$(if $(UBOOT),-$(UBOOT),).img
 
 DEPLOY_USER ?= root
 
@@ -27,12 +32,8 @@ DEPLOY_USER ?= root
 SHELL = /usr/bin/env bash
 _BUILDER_DIR = ./.pi-builder/$(PLATFORM)-$(BOARD)$(SUFFIX)
 
-define optbool
-$(filter $(shell echo $(1) | tr A-Z a-z),yes on 1)
-endef
-
-define fv
-$(shell curl --silent "https://files.pikvm.org/repos/arch/$(BOARD)/latest/$(1)")
+define fetch_version
+$(shell curl --silent "$(PIKVM_REPO_URL)/$(BOARD)-$(ARCH)/latest/$(1)")
 endef
 
 
@@ -70,16 +71,19 @@ os: $(_BUILDER_DIR)
 		' \
 		PROJECT=pikvm-os-$(PLATFORM)$(SUFFIX) \
 		BOARD=$(BOARD) \
+		ARCH=$(ARCH) \
+		UBOOT=$(UBOOT) \
 		STAGES='$(STAGES)' \
 		HOSTNAME=$(HOSTNAME) \
 		LOCALE=$(LOCALE) \
 		TIMEZONE=$(TIMEZONE) \
-		REPO_URL=$(REPO_URL)
+		REPO_URL=$(REPO_URL) \
+		PIKVM_REPO_URL=$(PIKVM_REPO_URL) \
+		PIKVM_REPO_KEY=$(PIKVM_REPO_KEY)
 
 
 $(_BUILDER_DIR):
-	mkdir -p `dirname $(_BUILDER_DIR)`
-	git clone --depth=1 https://github.com/mdevaev/pi-builder $(_BUILDER_DIR)
+	git clone --depth=1 $(BUILDER_URL) $(_BUILDER_DIR)
 
 
 update: $(_BUILDER_DIR)
@@ -88,7 +92,13 @@ update: $(_BUILDER_DIR)
 
 
 install: $(_BUILDER_DIR)
-	$(MAKE) -C $(_BUILDER_DIR) install CARD=$(CARD)
+	make -C $(_BUILDER_DIR) install \
+		CARD=$(CARD) \
+		BOARD=$(BOARD) \
+		ARCH=$(ARCH) \
+		UBOOT=$(UBOOT) \
+		CARD_DATA_FS_TYPE=$(if $(findstring v2-hdmi,$(PLATFORM)),ext4,) \
+		CARD_DATA_FS_FLAGS=-m0
 
 
 scan: $(_BUILDER_DIR)
@@ -109,14 +119,14 @@ _IMAGE_DATED := $(PLATFORM)-$(BOARD)$(SUFFIX)-$(shell date +%Y%m%d).img
 _IMAGE_LATEST := $(PLATFORM)-$(BOARD)$(SUFFIX)-latest.img
 image:
 	which xz
-	mkdir -p images
-	$(SUDO) bash -x -c ' \
-		truncate images/$(_IMAGE_DATED) -s 7G \
-		&& device=`losetup --find --show images/$(_IMAGE_DATED)` \
-		&& $(MAKE) install CARD=$$device \
+	mkdir -p images	
+	sudo bash -x -c ' \
+		dd if=/dev/zero of=$(IMAGE_FILE) bs=512 count=12582912 \
+		&& device=`losetup --find --show $(IMAGE_FILE)` \
+		&& make install CARD=$$device BOARD=$(BOARD) ARCH=$(ARCH) UBOOT=$(UBOOT)\
 		&& losetup -d $$device \
 	'
-	$(SUDO) chown $(shell id -u):$(shell id -g) images/$(_IMAGE_DATED)
+	sudo chown $(shell id -u):$(shell id -g) images/$(_IMAGE_DATED)
 	xz -9 --compress images/$(_IMAGE_DATED)
 	sha1sum images/$(_IMAGE_DATED).xz | awk '{print $$1}' > images/$(_IMAGE_DATED).xz.sha1
 	cd images && ln -sf $(_IMAGE_DATED).xz $(_IMAGE_LATEST).xz

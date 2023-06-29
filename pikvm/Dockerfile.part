@@ -66,8 +66,9 @@ RUN cp -a /etc/skel/.nanorc /root \
 COPY stages/pikvm/motd /etc/
 COPY stages/pikvm/issue /etc/
 
-RUN sed -i -f /usr/share/kvmd/configs.default/os/cmdline/$PLATFORM-$BOARD.sed /boot/cmdline.txt \
-	&& cp /usr/share/kvmd/configs.default/os/boot-config/$PLATFORM-$BOARD.txt /boot/config.txt
+RUN [ ! -f /boot/cmdline.txt ] || sed -i -f /usr/share/kvmd/configs.default/os/cmdline/$PLATFORM-$BOARD.sed /boot/cmdline.txt \
+	&& [ ! -f /usr/share/kvmd/configs.default/os/boot-config/$PLATFORM-$BOARD.txt ] \
+		|| cp /usr/share/kvmd/configs.default/os/boot-config/$PLATFORM-$BOARD.txt /boot/config.txt
 
 ARG ROOT_PASSWD
 ENV ROOT_PASSWD $ROOT_PASSWD
